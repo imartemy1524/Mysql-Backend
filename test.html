@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Social Network</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 0; padding: 20px; }
+        .page { display: none; }
+        .active { display: block; }
+        .post { border: 1px solid #ddd; padding: 10px; margin: 10px 0; }
+        .nav { margin-bottom: 20px; }
+        .error { color: red; }
+        .success { color: green; }
+        form { max-width: 400px; margin: 20px 0; }
+        input { display: block; margin: 10px 0; width: 100%; }
+        button { margin: 5px; }
+    </style>
+</head>
+<body>
+<div class="nav">
+    <a href="#/posts">All Posts</a>
+    <span id="authLinks">
+            <a href="#/login">Login</a> | <a href="#/register">Register</a>
+        </span>
+</div>
+
+<!-- Login Page -->
+<div id="loginPage" class="page">
+    <h2>Login</h2>
+    <form id="loginForm">
+        <input type="text" placeholder="Login" name="login" required>
+        <input type="password" placeholder="Password" name="password" required>
+        <button type="submit">Login</button>
+    </form>
+    <div class="message"></div>
+</div>
+
+<!-- Registration Page -->
+<div id="registerPage" class="page">
+    <h2>Register</h2>
+    <form id="registerForm">
+        <input type="text" placeholder="Nickname" name="nickname" required>
+        <input type="email" placeholder="Email" name="email" required>
+        <input type="password" placeholder="Password" name="password" required>
+        <button type="submit">Register</button>
+    </form>
+    <div class="message"></div>
+</div>
+
+<!-- Posts Page -->
+<div id="postsPage" class="page">
+    <h2>All Posts</h2>
+    <button onclick="location.hash='#/create-post'">Create New Post</button>
+    <div id="postsList"></div>
+</div>
+
+<!-- User Profile Page -->
+<div id="profilePage" class="page">
+    <h2>User Profile</h2>
+    <div id="userPosts"></div>
+</div>
+
+<!-- Create Post Page -->
+<div id="createPostPage" class="page">
+    <h2>Create New Post</h2>
+    <form id="createPostForm">
+        <input type="text" placeholder="Title" name="title" required>
+        <textarea placeholder="Content" name="content" required></textarea>
+        <button type="submit">Create Post</button>
+    </form>
+</div>
+
+<script>
+    const API_BASE = '/';
+    let currentUser = JSON.parse(localStorage.getItem('currentUser'));
+
+    // Routing
+    function handleRoute() {
+        const hash = window.location.hash.substring(2);
+        const [path, param] = hash.split('/');
+
+        document.querySelectorAll('.page').forEach(page => page.classList.remove('active'));
+
+        switch(path) {
+            case 'login':
+                showPage('loginPage');
+                break;
+            case 'register':
+                showPage('registerPage');
+                break;
+            case 'posts':
+                showPage('postsPage');
+                loadPosts();
+                break;
+            case 'users':
+                showPage('profilePage');
+                loadUserPosts(param.substring(2));
+                break;
+            case 'create-post':
+                showPage('createPostPage');
+                break;
+            default:
+                showPage('postsPage');
+                loadPosts();
+        }
+    }
+
+    function showPage(pageId) {
+        document.getElementById(pageId).classList.add('active');
+    }
+
+    // API Handler
+    async function callAPI(endpoint, params = {}) {
+        const url = new URL(API_BASE + endpoint, window.location.origin);
+        Object.keys(params).forEach(key => url.searchParams.append(key, params[key]));
+
+        try {
+            const response = await fetch(url);
+            return await response.json();
+        } catch (error) {
+            return { error: error.message };
+        }
+    }
+
+    // Auth Functions
+    async function handleLogin(login, password) {
+        const response = await callAPI('login', { login, password });
+        if (response.token) {
+            localStorage.setItem('currentUser', JSON.stringify(response));
+            currentUser = response;
+            window.location.hash = '#/posts';
+        }
+        return response;
+    }
+
+    async function handleRegister(nickname, email, password) {
+        return await callAPI('register', { nickname, email, password });
+    }
+
+    // Post Functions
+    async function createPost(title, content) {
+        return await callAPI('create-post', {
+            token: currentUser?.token,
+            title,
+            content
+        });
+    }
+
+    async function loadPosts() {
+        const posts = await callAPI('get-post');
+        renderPosts(posts, '#postsList');
+    }
+
+    async function loadUserPosts(userId) {
+        const posts = await callAPI('get-post', { user_id: userId });
+        renderPosts(posts, '#userPosts');
+    }
+
+    function renderPosts(posts, container) {
+        const html = posts?.map(post => `
+        <div class="post">
+            <h3>${post.title}</h3>
+            <p>${post.content}</p>
+            <small>By User ${post.user_id} • ${post.likes} likes</small>
+            <div>
+                <button onclick="likePost(${post.id})">Like</button>
+                <button onclick="dislikePost(${post.id})">Dislike</button>
+                ${post.user_id === currentUser?.id ? `
+                    <button onclick="deletePost(${post.id})">Delete</button>
+                ` : ''}
+            </div>
+        </div>
+    `).join('');
+        document.querySelector(container).innerHTML = html || 'No posts found';
+    }
+
+    async function likePost(postId) {
+        await callAPI('like-post', {
+            token: currentUser?.token,
+            post_id: postId
+        });
+        loadPosts();
+    }
+
+    async function dislikePost(postId) {
+        await callAPI('dislike-post', {
+            token: currentUser?.token,
+            post_id: postId
+        });
+        loadPosts();
+    }
+
+    async function deletePost(postId) {
+        await callAPI('delete-post', {
+            token: currentUser?.token,
+            post_id: postId
+        });
+        loadPosts();
+    }
+
+    // Event Listeners
+    window.addEventListener('hashchange', handleRoute);
+    document.addEventListener('DOMContentLoaded', handleRoute);
+
+    document.getElementById('loginForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const formData = new FormData(e.target);
+        const response = await handleLogin(formData.get('login'), formData.get('password'));
+        showMessage(e.target.closest('.page').querySelector('.message'), response);
+    });
+
+    document.getElementById('registerForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const formData = new FormData(e.target);
+        const response = await handleRegister(
+            formData.get('nickname'),
+            formData.get('email'),
+            formData.get('password')
+        );
+        showMessage(e.target.closest('.page').querySelector('.message'), response);
+    });
+
+    document.getElementById('createPostForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const formData = new FormData(e.target);
+        const response = await createPost(formData.get('title'), formData.get('content'));
+        if (response.id) {
+            window.location.hash = '#/posts';
+        }
+    });
+
+    function showMessage(element, response) {
+        element.className = response.error ? 'error' : 'success';
+        element.textContent = response.error || response.message || 'Success!';
+    }
+
+    // Initialization
+    if (currentUser) {
+        document.getElementById('authLinks').innerHTML = `
+        <span>Welcome ${currentUser.nickname}</span>
+        <button onclick="localStorage.removeItem('currentUser'); location.reload()">Logout</button>
+    `;
+    }
+</script>
+</body>
+</html>
